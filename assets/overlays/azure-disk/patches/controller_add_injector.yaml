@@ -8,7 +8,7 @@ spec:
   template:
     spec:
       initContainers:
-        # Merge /etc/kubernetes/cloud.conf (on the host) with secret "azure-file-credentials" into "merged-cloud-config" emptydir.
+        # Merge /etc/kubernetes/cloud.conf (on the host) with secret "azure-disk-credentials" into "merged-cloud-config" emptydir.
         - name: azure-inject-credentials
           image: ${CLUSTER_CLOUD_CONTROLLER_MANAGER_OPERATOR_IMAGE}
           command:
@@ -16,7 +16,7 @@ spec:
           args:
             - --cloud-config-file-path=/etc/cloud-config/config
             - --output-file-path=/etc/kubernetes/cloud.conf
-            # Force disable node's managed identity, azure-file-credentials Secret should be used.
+            # Force disable node's managed identity, azure-disk-credentials Secret should be used.
             - --disable-identity-extension-auth
             - --enable-azure-workload-identity=${ENABLE_AZURE_WORKLOAD_IDENTITY}
             - --creds-path=/etc/azure/credentials
@@ -34,11 +34,11 @@ spec:
         - name: src-cloud-config
           configMap:
             name: azure-cloud-config
-        - name: cloud-sa-volume
-          secret:
-            secretName: azure-file-credentials
         - emptyDir: {}
           name: cloud-config
+        - name: cloud-sa-volume
+          secret:
+            secretName: ${AZURE_CLOUD_SECRET_NAME}
         - name: bound-sa-token
           projected:
             sources:

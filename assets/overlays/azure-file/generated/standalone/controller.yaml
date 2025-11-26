@@ -20,7 +20,7 @@
 # Applied strategic merge patch pod_network_livenessprobe.yaml
 # Applied strategic merge patch common/standalone/controller_add_affinity.yaml
 # Applied strategic merge patch common/readOnlyRootFilesystem.yaml
-# Applied strategic merge patch overlays/azure-file/patches/controller_add_standalone_injector.yaml
+# Applied strategic merge patch overlays/azure-file/patches/controller_add_injector.yaml
 #
 #
 
@@ -395,7 +395,7 @@ spec:
         name: src-cloud-config
       - name: cloud-sa-volume
         secret:
-          secretName: azure-file-credentials
+          secretName: ${AZURE_CLOUD_SECRET_NAME}
       - emptyDir: {}
         name: cloud-config
       - name: bound-sa-token

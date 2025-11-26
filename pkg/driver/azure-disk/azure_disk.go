@@ -35,7 +35,9 @@ import (
 )
 
 const (
-	cloudCredSecretName   = "azure-disk-credentials"
+	cloudCredSecretName           = "azure-disk-credentials"
+	cloudCredSecretNameHyperShift = "azure-disk-csi-config"
+
 	metricsCertSecretName = "azure-disk-csi-driver-controller-metrics-serving-cert"
 	infrastructureName    = "cluster"
 	cloudConfigName       = "kube-cloud-config"
@@ -107,10 +109,8 @@ func GetAzureDiskGeneratorConfig() *generator.CSIDriverGeneratorConfig {
 				),
 			},
 			Assets: commongenerator.DefaultControllerAssets,
-			AssetPatches: commongenerator.DefaultAssetPatches.WithPatches(generator.HyperShiftOnly,
-				"controller.yaml", "overlays/azure-disk/patches/controller_add_hypershift_controller.yaml",
-			).WithPatches(generator.StandaloneOnly,
-				"controller.yaml", "overlays/azure-disk/patches/controller_add_standalone_injector.yaml",
+			AssetPatches: commongenerator.DefaultAssetPatches.WithPatches(generator.AllFlavours,
+				"controller.yaml", "overlays/azure-disk/patches/controller_add_injector.yaml",
 			),
 		},
 
@@ -208,7 +208,9 @@ func GetAzureDiskOperatorControllerConfig(ctx context.Context, flavour generator
 	}
 	cfg.ExtraControlPlaneControllers = append(cfg.ExtraControlPlaneControllers, configMapSyncer)
 
+	azureCloudSecretName := cloudCredSecretName
 	if flavour == generator.FlavourHyperShift {
+		azureCloudSecretName = cloudCredSecretNameHyperShift
 		azureDiskSecretProviderClass := strings.TrimSpace(os.Getenv("ARO_HCP_SECRET_PROVIDER_CLASS_FOR_DISK"))
 		if azureDiskSecretProviderClass != "" {
 			cfg.DeploymentHooks = append(cfg.DeploymentHooks, withAROCSIVolume(azureDiskSecretProviderClass))
@@ -220,6 +222,7 @@ func GetAzureDiskOperatorControllerConfig(ctx context.Context, flavour generator
 		pairs := []string{}
 		pairs = append(pairs, []string{"${CLUSTER_CLOUD_CONTROLLER_MANAGER_OPERATOR_IMAGE}", os.Getenv(ccmOperatorImageEnvName)}...)
 		pairs = append(pairs, []string{"${ENABLE_AZURE_WORKLOAD_IDENTITY}", "true"}...)
+		pairs = append(pairs, []string{"${AZURE_CLOUD_SECRET_NAME}", azureCloudSecretName}...)
 		return pairs
 	}
 
