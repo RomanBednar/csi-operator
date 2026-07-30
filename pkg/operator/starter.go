@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
+	configv1 "github.com/openshift/api/config/v1"
 	opv1 "github.com/openshift/api/operator/v1"
 	"github.com/openshift/csi-operator/assets"
 	"github.com/openshift/csi-operator/pkg/clients"
@@ -14,6 +15,8 @@ import (
 	"github.com/openshift/csi-operator/pkg/generator"
 	"github.com/openshift/csi-operator/pkg/operator/config"
 	"github.com/openshift/csi-operator/pkg/operator/volume_snapshot_class"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 
 	"github.com/openshift/library-go/pkg/controller/controllercmd"
@@ -61,6 +64,20 @@ func RunOperator(ctx context.Context, controllerConfig *controllercmd.Controller
 	c := builder.BuildOrDie(ctx)
 
 	klog.Infof("Building clients is done")
+
+	// Set up a cancellable context so we can restart the operator when TLS profile changes.
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	// Watch for TLS profile or adherence changes on the APIServer CR and restart the
+	// operator process so it picks up the new configuration. The CSIConfigObserverController
+	// handles re-syncing the CSI driver deployment with new TLS values, but the operator
+	// process itself needs a restart to apply any changes to its own serving configuration.
+	if _, err := c.ConfigInformers.Config().V1().APIServers().Informer().AddEventHandler(
+		newAPIServerTLSChangeHandler(cancel),
+	); err != nil {
+		return fmt.Errorf("failed to add APIServer TLS profile change handler: %w", err)
+	}
 
 	// Build ControllerConfig
 	csiOperatorControllerConfig, err := opConfig.OperatorControllerConfigBuilder(ctx, flavour, c)
@@ -287,6 +304,28 @@ func RunOperator(ctx context.Context, controllerConfig *controllercmd.Controller
 	}
 
 	return nil
+}
+
+func newAPIServerTLSChangeHandler(cancel context.CancelFunc) cache.ResourceEventHandlerFuncs {
+	return cache.ResourceEventHandlerFuncs{
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			oldAPI, ok1 := oldObj.(*configv1.APIServer)
+			newAPI, ok2 := newObj.(*configv1.APIServer)
+			if !ok1 || !ok2 {
+				return
+			}
+			if !equality.Semantic.DeepEqual(oldAPI.Spec.TLSSecurityProfile, newAPI.Spec.TLSSecurityProfile) {
+				klog.Infof("Cluster TLS security profile changed, restarting operator to apply new configuration")
+				cancel()
+				return
+			}
+			if oldAPI.Spec.TLSAdherence != newAPI.Spec.TLSAdherence {
+				klog.Infof("TLS adherence policy changed from %q to %q, restarting operator", oldAPI.Spec.TLSAdherence, newAPI.Spec.TLSAdherence)
+				cancel()
+				return
+			}
+		},
+	}
 }
 
 // getOperatorSyncState returns the management state of the operator to determine

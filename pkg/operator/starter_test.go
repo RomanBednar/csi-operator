@@ -1,9 +1,11 @@
 package operator
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 
+	configv1 "github.com/openshift/api/config/v1"
 	opv1 "github.com/openshift/api/operator/v1"
 	"github.com/openshift/csi-operator/assets"
 	azure_disk "github.com/openshift/csi-operator/pkg/driver/azure-disk"
@@ -163,6 +165,96 @@ func TestDefaultReplacements(t *testing.T) {
 			if generatedNameSpace != tc.controlPlaneNamespace {
 				t.Fatalf("expected generated Deployment to use namespace %v, got %v", tc.controlPlaneNamespace, generatedNameSpace)
 			}
+		})
+	}
+}
+
+func TestTLSProfileChangeHandler(t *testing.T) {
+	intermediateProfile := &configv1.TLSSecurityProfile{
+		Type: configv1.TLSProfileIntermediateType,
+	}
+	modernProfile := &configv1.TLSSecurityProfile{
+		Type: configv1.TLSProfileModernType,
+	}
+
+	tests := []struct {
+		name       string
+		oldObj     interface{}
+		newObj     interface{}
+		wantCancel bool
+	}{
+		{
+			name: "TLSSecurityProfile changed triggers cancel",
+			oldObj: &configv1.APIServer{
+				Spec: configv1.APIServerSpec{
+					TLSSecurityProfile: intermediateProfile,
+				},
+			},
+			newObj: &configv1.APIServer{
+				Spec: configv1.APIServerSpec{
+					TLSSecurityProfile: modernProfile,
+				},
+			},
+			wantCancel: true,
+		},
+		{
+			name: "TLSAdherence changed triggers cancel",
+			oldObj: &configv1.APIServer{
+				Spec: configv1.APIServerSpec{
+					TLSAdherence: configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly,
+				},
+			},
+			newObj: &configv1.APIServer{
+				Spec: configv1.APIServerSpec{
+					TLSAdherence: configv1.TLSAdherencePolicyStrictAllComponents,
+				},
+			},
+			wantCancel: true,
+		},
+		{
+			name: "no change does not trigger cancel",
+			oldObj: &configv1.APIServer{
+				Spec: configv1.APIServerSpec{
+					TLSSecurityProfile: intermediateProfile,
+					TLSAdherence:       configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly,
+				},
+			},
+			newObj: &configv1.APIServer{
+				Spec: configv1.APIServerSpec{
+					TLSSecurityProfile: intermediateProfile,
+					TLSAdherence:       configv1.TLSAdherencePolicyLegacyAdheringComponentsOnly,
+				},
+			},
+			wantCancel: false,
+		},
+		{
+			name:       "wrong type does not panic",
+			oldObj:     "not-an-apiserver",
+			newObj:     "not-an-apiserver",
+			wantCancel: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			cancelled := false
+			testCancel := func() {
+				cancelled = true
+				cancel()
+			}
+
+			handler := newAPIServerTLSChangeHandler(testCancel)
+
+			handler.UpdateFunc(tt.oldObj, tt.newObj)
+
+			if cancelled != tt.wantCancel {
+				t.Errorf("cancel called = %v, want %v", cancelled, tt.wantCancel)
+			}
+
+			_ = ctx
 		})
 	}
 }
